@@ -1,0 +1,49 @@
+name: 华工自考日报
+
+on:
+  schedule:
+    # UTC 01:00 = 北京时间 09:00；GitHub 高峰期可能延迟 5–20 分钟
+    - cron: "0 1 * * *"
+  workflow_dispatch: {}   # 支持手动点一下立即跑
+
+permissions:
+  contents: write         # 用于把 state.json 去重状态提交回仓库
+
+concurrency:
+  group: daily-zk-report
+  cancel-in-progress: false
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: Asia/Shanghai
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 抓取并发送日报
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: python send_daily.py
+
+      - name: 回写去重状态
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain state.json)" ]; then
+            git config user.name "zk-monitor-bot"
+            git config user.email "actions@users.noreply.github.com"
+            git add state.json
+            git commit -m "chore(state): 更新去重基线 [skip ci]"
+            git push
+          else
+            echo "state.json 无变化"
+          fi

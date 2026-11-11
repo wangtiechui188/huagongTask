@@ -15,6 +15,7 @@
 """
 import os
 import re
+import json
 import ssl
 import sys
 import smtplib
@@ -172,8 +173,32 @@ def send(subject, text, to_addr):
         s.send_message(msg)
 
 
+STATE = os.path.join(BASE, "state.json")
+
+
+def load_state():
+    try:
+        with open(STATE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def mark_sent(today):
+    st = load_state()
+    st["last_email_date"] = today
+    with open(STATE, "w", encoding="utf-8") as f:
+        json.dump(st, f, ensure_ascii=False, indent=1)
+
+
+def already_sent(today):
+    """GitHub schedule 可能触发多次（我们排了 3 个时段兜底），当日只发一封"""
+    return load_state().get("last_email_date") == today
+
+
 def main():
     args = sys.argv[1:]
+    force = "--force" in args
     out, ok = run_monitor()
     print(out)
     print("\n" + "=" * 60)
@@ -191,8 +216,12 @@ def main():
     if "--dry-run" in args or "--body-only" in args:
         print("[dry-run] 未发送邮件")
         return 0
+    if already_sent(today) and not force:
+        print(f"[skip] {today} 已发送过日报邮件，本次为兜底触发，跳过（--force 可强制重发）")
+        return 0
     try:
         send(subject, text, to_addr)
+        mark_sent(today)
         print(f"[ok] 已发送至 {to_addr}")
         return 0
     except Exception as e:
